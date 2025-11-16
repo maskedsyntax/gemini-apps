@@ -11,20 +11,27 @@ _ = load_dotenv()
 # Initialize Gemini
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Session state setup
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
-
 # Load history from file for cross-session persistence
 HISTORY_FILE = "chat_history.json"
 
 
-# @st.cache_data
 def load_history_from_file():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
             return json.load(f)
     return []
+
+
+def save_history_to_file(history: list[tuple[str, str]]) -> None:
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+# Session state setup
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = load_history_from_file()
+    if st.session_state.chat_history:
+        st.toast("Loaded previous chat from file", icon="info")
 
 
 loaded_history = load_history_from_file()
@@ -65,10 +72,11 @@ def get_gemini_response(user_input):
         )
 
         full_response = ""
+        placeholder = st.empty()
         for chunk in response:
             if chunk.text:
-                st.write(chunk.text)
                 full_response += chunk.text
+                placeholder.markdown(full_response + "▌")
 
         # Save bot response to history
         st.session_state.chat_history.append(("Bot", full_response.strip()))
@@ -79,50 +87,41 @@ def get_gemini_response(user_input):
         return "Sorry, something went wrong."
 
 
-# ========= UI ==========
-st.set_page_config(page_title="Gemini QnA with History App")
-st.header("Gemini QnA with History App")
+# -------------------------------------------------
+# UI
+# -------------------------------------------------
+st.set_page_config(page_title="Gemini Chat – Persistent", layout="centered")
+st.title("Gemini Chat")
 
-input = st.text_input("Input: ", key="input")
-submit = st.button("Ask the question")
+# ---- Show previous messages -------------------------------------------------
+for role, text in st.session_state.chat_history:
+    with st.chat_message("user" if role == "You" else "assistant"):
+        st.markdown(text)
 
-if submit and input:
-    with st.spinner("Thinking..."):
-        get_gemini_response(input)
+# ---- Input -------------------------------------------------
+if prompt := st.chat_input("Ask Gemini…"):
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking…"):
+            get_gemini_response(prompt)
 
 
-# Save history to file on clear or manually
-def save_history_to_file():
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(st.session_state.chat_history, f)
-
-
-# ===== DISPLAY CHAT HISTORY =====
-st.subheader("Chat History")
-chat_container = st.container()
-with chat_container:
-    for role, text in st.session_state.chat_history:
-        if role == "You":
-            st.markdown(f"**You:** {text}")
-        else:
-            st.markdown(f"**Gemini** {text}")
-
-# Controls
+# ---- Sidebar controls -------------------------------------------------
 with st.sidebar:
     st.header("Controls")
 
     if st.button("Clear Chat", type="primary"):
-        # 1. Delete the file
         if os.path.exists(HISTORY_FILE):
             os.remove(HISTORY_FILE)
-        # 2. Reset session state
         st.session_state.chat_history = []
-        st.success("Chat cleared! (file removed)")
+        st.success("Chat cleared – file removed")
         st.rerun()
 
     if st.button("Save History Now"):
-        save_history_to_file()
-        st.success("History saved to `chat_history.json`")
+        save_history_to_file(st.session_state.chat_history)
+        st.success("Saved to `chat_history.json`")
 
     if st.button("Load History from File"):
         fresh = load_history_from_file()
